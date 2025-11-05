@@ -21,14 +21,16 @@ KEYBERT_DIVERSITY = 0.6 # rendundance penalty for mmr
 # IMPORTANT: match to actual CSV column names exactly (case / spacing)
 fields = [
     "Title",
-    "Category",
+    "Object type",
     "Culture",
-    "Country",
-    "Dates",
-    "Material and Techniques",
+    "country",
+    "Production date",
+    "Material",
+    "Technique",
     "Inscription",
-    "Era of extraction", 
-    "Museum",
+    "Acq date", 
+    "museum",
+    "Image1", "Image2", "Image3", "Image4", "Image5"
 ]
 
 if RANDOM_SEED is not None:
