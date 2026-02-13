@@ -3,9 +3,6 @@ import random
 from collections import defaultdict
 from typing import Dict, List
 
-from keybert import KeyBERT  # pip install keybert sentence-transformers
-# moving keybert usage here to only extract keywords during dataset prep
-
 
 # Config
 
@@ -13,23 +10,21 @@ IN_CSV = "data/train.csv"
 OUT_CSV = "data/train_prompted.csv"
 PROMPT_TXT = "promptstructures.txt"  # or "data/promptstructures.txt"
 RANDOM_SEED = 42          # set to none for completely random behavior, but this keeps it deterministic 
-KEYBERT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"  # from sentence-transformers
-KEYBERT_TOP_N = 10
-KEYBERT_USE_MMR = True # maximum marginal relevance to avoid redudancy but maintain relevance 
-KEYBERT_DIVERSITY = 0.6 # rendundance penalty for mmr
+ROW_KEY = "ROW"
+OUT_PROMPT_COL = "prompt"
 
-# IMPORTANT: match to actual CSV column names exactly (case / spacing)
+
 fields = [
-    "Title",
-    "Object type",
-    "Culture",
+    "id",
     "country",
-    "Production date",
-    "Material",
-    "Technique",
-    "Inscription",
-    "Acq date", 
+    "itemlat",
+    "itemlon",
+    "murdock_name",
+    "Acq.date",
     "museum",
+    "categorization",
+    "is_fragment",
+    "materials",
     "Image1", "Image2", "Image3", "Image4", "Image5"
 ]
 
@@ -59,68 +54,49 @@ def transform_value(field: str, val: str) -> str:
     if val is None:
         return ""
     s = ' '.join(str(val).split()) # normalize whitespace 
-    if field in {"Category", "Material and Techniques"}:
+    if field in {"categorization", "materials"}:
         s = s.lower()
     return s
 
-# keybert on the title only 
-kw_model = KeyBERT(model=KEYBERT_MODEL)
-
-def compress_title_with_keybert(title_text: str) -> str:
-    if not title_text or not str(title_text).strip():
-        return ""
-    try:
-        keywords = kw_model.extract_keywords(
-            str(title_text),
-            keyphrase_ngram_range=(1, 3) #1-3 word phrases,
-            stop_words="english",
-            use_mmr=KEYBERT_USE_MMR,
-            diversity=KEYBERT_DIVERSITY,
-            top_n=KEYBERT_TOP_N,
-        )
-        # keep only keyword strings; join for a compact Title
-        return "; ".join([kw for kw, _ in keywords]) or str(title_text)
-    except Exception:
-        # fallback: return original on any error
-        return str(title_text)
-
-# rendering 
-def render_field(field: str, value: str) -> str:
-    if value is None or str(value).strip() == "":
-        return ""
-    templates = prompts_map.get(field)
+def render_row_prompt(row: dict) -> str:
+    templates = prompts_map.get(ROW_KEY)
     if not templates:
-        return str(value)
+        return ""
     template = random.choice(templates)
-    return template.format(value=transform_value(field, value))
 
+    safe = defaultdict(str)
+    for k, v in row.items():
+        safe[k] = transform_value(k, v)
+
+    try:
+        return template.format_map(safe)
+    
+    except Exception as e:
+        raise ValueError(f"bad row template: {template}") from e
+    
 def transform_row(row: dict) -> dict:
     new_row = dict(row)
-
-    # 1) Pre-step: first convert title to KeyBERT keywords
-    if "Title" in new_row:
-        new_row["Title"] = compress_title_with_keybert(new_row["Title"])
-
-    # 2) For each field, replace with a random per-field prompt
-    for field in fields:
-        if field in new_row:
-            new_row[field] = render_field(field, new_row[field])
-
+    new_row[OUT_PROMPT_COL] = render_row_prompt(row)
     return new_row
 
 
 # write new csv
 def write_prompted_csv(in_csv: str, out_csv: str):
-    with open(in_csv, "r", newline="", encoding="utf-8") as fin:
+    with open(in_csv, "r", newline="", encoding="utf-8") as fin, \
+         open(out_csv, "w", newline="", encoding="utf-8") as fout:
+        
+        
         reader = csv.DictReader(fin)
         fieldnames = reader.fieldnames
         assert fieldnames is not None, "CSV appears empty or malformed."
-        rows_out = [transform_row(row) for row in reader]
+        if OUT_PROMPT_COL not in fieldnames:
+            fieldnames = fieldnames + [OUT_PROMPT_COL]
 
-    with open(out_csv, "w", newline="", encoding="utf-8") as fout:
         writer = csv.DictWriter(fout, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(rows_out)
+
+        for row in reader:
+            writer.writerow(transform_row(row))
 
 if __name__ == "__main__":
     write_prompted_csv(IN_CSV, OUT_CSV)
